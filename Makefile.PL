@@ -4,10 +4,10 @@ use ExtUtils::MakeMaker;
 
 WriteMakefile (
  NAME		=> "Thread::Deadlock",
- ($[ >= 5.005) ?
- (AUTHOR	=> 'Elizabeth Mattijsen (liz@dijkmat.nl)',
-  ABSTRACT	=> 'report deadlocks with stacktrace') : (),
+ AUTHOR		=> 'Elizabeth Mattijsen (liz@dijkmat.nl)',
+ ABSTRACT	=> 'report deadlocks with stacktrace',
  VERSION_FROM	=> 'lib/Thread/Deadlock.pm',
  PREREQ_PM	=> {
+		    load => 0,
                    },
 );

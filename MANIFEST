@@ -7,3 +7,4 @@ Makefile.PL
 lib/Thread/Deadlock.pm
 t/Deadlock01.t
 t/Deadlock02.t
+META.yml                                Module meta-data (added by MakeMaker)

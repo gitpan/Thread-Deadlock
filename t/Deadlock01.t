@@ -5,6 +5,21 @@ BEGIN {				# Magic Perl CORE pragma
     }
 }
 
+BEGIN {
+    warn <<EOD if -t STDERR;
+
+
+Please note that some warnings may appear during testing.  These seem to be
+the result of a weird interaction between Thread::Deadlock, Test::More and
+threads.  During normal operation, Thread::Deadlock should not produce any
+warnings.  If you should see any warnings, please report these.  Thank you
+for your attention.
+
+EOD
+} #BEGIN
+
+use strict;
+use warnings;
 use Test::More tests => 7;
 
 BEGIN { use_ok( 'Thread::Deadlock' ) }

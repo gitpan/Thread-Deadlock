@@ -3,12 +3,12 @@ package Thread::Deadlock;
 # Make sure we have version info for this module
 # Make sure we do everything by the book from now on
 
-our $VERSION = '0.04';
+$VERSION = '0.05';
 use strict;
 
 # Make sure we only load stuff when we actually need it
 
-use AutoLoader 'AUTOLOAD';
+use load;
 
 # Make sure we have threads
 # Make sure we can lock
@@ -83,7 +83,7 @@ $paths = qr#(?<= at )(?:$paths)#;
 #  IN: 1 class (ignored)
 #      2 output filename (optional)
 # or:
-#  IN: 1 class (ignored)
+#  IN: 1 class
 #      2..N method/value hash
 
 sub import {
@@ -729,7 +729,7 @@ Please report bugs to <perlbugs@dijkmat.nl>.
 
 =head1 COPYRIGHT
 
-Copyright (c) 2002 Elizabeth Mattijsen <liz@dijkmat.nl>. All rights
+Copyright (c) 2002-2003 Elizabeth Mattijsen <liz@dijkmat.nl>. All rights
 reserved.  This program is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.
 
