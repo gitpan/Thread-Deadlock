@@ -3,7 +3,7 @@ package Thread::Deadlock;
 # Make sure we have version info for this module
 # Make sure we do everything by the book from now on
 
-$VERSION = '0.05';
+$VERSION = '0.06';
 use strict;
 
 # Make sure we only load stuff when we actually need it
@@ -129,7 +129,7 @@ END {
 
 #---------------------------------------------------------------------------
 
-# AutoLoader takes over from here
+# load takes over from here
 
 __END__
 
@@ -498,6 +498,8 @@ EOD
 
 #---------------------------------------------------------------------------
 
+__END__
+
 =head1 NAME
 
 Thread::Deadlock - report deadlocks with stacktrace
@@ -703,9 +705,13 @@ The "untrace" class method disables tracing for B<all> threads.  This can be
 handy if there are sections in your program that you do not want to have
 traced.
 
+=head1 REQUIRED MODULES
+
+ load (any)
+
 =head1 OPTIMIZATIONS
 
-This module uses L<AutoLoader> to reduce memory and CPU usage. This causes
+This module uses L<load> to reduce memory and CPU usage. This causes
 subroutines only to be compiled in a thread when they are actually needed at
 the expense of more CPU when they need to be compiled.  Simple benchmarks
 however revealed that the overhead of the compiling single routines is not
@@ -735,6 +741,6 @@ modify it under the same terms as Perl itself.
 
 =head1 SEE ALSO
 
-L<threads>, L<threads::shared>.
+L<threads>, L<threads::shared>, L<load>.
 
 =cut

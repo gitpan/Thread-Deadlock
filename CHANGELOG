@@ -1,3 +1,8 @@
+0.06	28 December 2003
+	Added automatic required modules update using Devel::Required.
+
+	Removed mention of AutoLoader from the pod.
+
 0.05	13 August 2003
 	Cleaned up Makefile.PL and updated copyright info.  Removed "our"
 	from $VERSION as per my other Thread::xxx modules.  Now uses "load"
