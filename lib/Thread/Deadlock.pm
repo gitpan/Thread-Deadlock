@@ -3,7 +3,7 @@ package Thread::Deadlock;
 # Make sure we have version info for this module
 # Make sure we do everything by the book from now on
 
-our $VERSION : unique = '0.01';
+our $VERSION : unique = '0.02';
 use strict;
 
 # Make sure we have threads
@@ -15,27 +15,51 @@ use threads::shared ();
 use sigtrap qw(die normal-signals);
 
 # Make sure we can cluck
-# Report flag (so only (n)one thread will report)
+# Initialize hi-jacked flag
+# Initialize output destination
 # Report from each thread
 
 use Carp ();
-my $report : shared = 'STDERR';
+my $hijacked;
+my $output : shared = 'STDERR';
 my %report : shared;
+
+# Initialize summary setting
+# Initialize callers setting
+# Initialize shorten setting
+# Initialize format
+# Initialize XML encoding
+
+my $summary  : shared = 'auto';
+my $callers  : shared = 4;
+my $shorten  : shared = 1;
+my $format   : shared = 'plain';
+my $encoding : shared = 'iso-latin-1';
 
 # Save current coderefs
 
-my $cond_wait = \&threads::shared::cond_wait;
-my $cond_signal = \&threads::shared::cond_signal;
+my $cond_wait      = \&threads::shared::cond_wait;
+my $cond_signal    = \&threads::shared::cond_signal;
 my $cond_broadcast = \&threads::shared::cond_broadcast;
 
+# Make sure we don't get warnings for the hijacking
 # Install hi-jacked coderefs, we can't do lock() yet ;-(
 
-*threads::shared::cond_wait =
- sub (\[$@%]) { _remember( 'cond_wait()' ); goto &$cond_wait };
-*threads::shared::cond_signal =
- sub (\[$@%]) { _remember( 'cond_signal()' ); goto &$cond_signal };
-*threads::shared::cond_broadcast =
- sub (\[$@%]) { _remember( 'cond_broadcast()' ); goto &$cond_broadcast };
+{
+ no warnings 'redefine';
+ *threads::shared::cond_wait =
+  sub (\[$@%]) { _remember( 'cond_wait()' ); goto &$cond_wait };
+ *threads::shared::cond_signal =
+  sub (\[$@%]) { _remember( 'cond_signal()' ); goto &$cond_signal };
+ *threads::shared::cond_broadcast =
+  sub (\[$@%]) { _remember( 'cond_broadcast()' ); goto &$cond_broadcast };
+}
+
+# Create match string for paths
+# Make a regular exprssion of it
+
+our $paths : unique = join( '/|',sort {length($b) - length($a)} @INC ).'/';
+$paths = qr#(?<= at )(?:$paths)#;
 
 # Satisfy -require-
 
@@ -47,10 +71,125 @@ my $cond_broadcast = \&threads::shared::cond_broadcast;
 
 #---------------------------------------------------------------------------
 #  IN: 1 class (ignored)
+
+sub on { $hijacked = 1 } #on
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+
+sub off { $hijacked = 0 } #off
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+#      2 new summary setting
+# OUT: 1 current summary setting
+
+sub summary {
+
+# If a new setting is specified
+#  Die now if invalid parameter
+#  Set new parameter
+# Return current setting
+
+    if (@_ == 2) {
+        die "Invalid parameter $_[1] to summary\n"
+	 unless $_[1] =~ m#^(?:auto|0|1)$#;
+        $summary = $_[1];
+    }
+    $summary;
+} #summary
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+#      2 new callers setting
+# OUT: 1 current callers setting
+
+sub callers {
+
+# If a new setting is specified
+#  Die now if invalid parameter
+#  Set new parameter
+# Return current setting
+
+    if (@_ == 2) {
+        die "Invalid parameter $_[1] to callers\n" unless $_[1] =~ m#^\d+$#;
+        $callers = $_[1];
+    }
+    $callers;
+} #callers
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+#      2 new shorten setting
+# OUT: 1 current shorten setting
+
+sub shorten {
+
+# Set if a new setting is specified
+# Return current setting
+
+    $shorten = $_[1] if @_ == 2;
+    $shorten;
+} #shorten
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+#      2 new format setting
+# OUT: 1 current format setting
+
+sub format {
+
+# If a new setting is specified
+#  Die now if invalid parameter
+#  Set new parameter
+# Return current setting
+
+    if (@_ == 2) {
+        die "Invalid parameter $_[1] to summary\n"
+	 unless $_[1] =~ m#^(?:plain|xml)$#;
+        $format = $_[1];
+    }
+    $format;
+} #format
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+#      2 new encoding setting
+# OUT: 1 current encoding setting
+
+sub encoding {
+
+# Set if a new setting is specified
+# Return current setting
+
+    $encoding = $_[1] if @_ == 2;
+    $encoding;
+} #encoding
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+# OUT: 1 generated report
+
+sub report {
+
+# Allow for non variable references
+# Create a report and return it
+
+    no strict 'refs';
+    join( '',&{'_'.$format} );
+} #report
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
 #      2 name of file to write to (no change)
 # OUT: 1 current setting
 
-sub report { $report = $_[1] if @_ >1; $report } #report
+sub output { $output = $_[1] if @_ >1; $output } #output
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+
+sub disable { $output = '' } #disable
 
 #---------------------------------------------------------------------------
 
@@ -61,31 +200,158 @@ sub report { $report = $_[1] if @_ >1; $report } #report
 
 sub _remember {
 
+# Return now if there is nothing to do
+
+    return unless $hijacked;
+
 # Obtain the thread we're in
 # Obtain the stacktrace
 # Remove this call
 # Add what we're remembering
-# Indicate start of thread if appropriate
+# Create version that can be stored in shared hash
 
     my $tid = threads->tid;
     my @cluck = split( m#(?<=$/)#,Carp::longmess() );
     shift( @cluck );
-    $cluck[0] =~ s#.*?called#"Thread $tid: ".shift#e;
-    $cluck[-1] =~ s#eval \{\.\.\.\} called#thread started#;
+    $cluck[0] =~ s#.*?called#shift#e;
+    my $report = join( "\0",@cluck );
 
-# Initialize local report
-# For all of the lines,
-#  Remove the thread information (if any)
-#  Add to the report for this thread
-# Save the report in the shared hash
+# Create a hash with valid tid's (include main thread, which is not in list)
+# For all of the keys in the report hash
+#  Remove this thread's report if the thread is dead
+# Save the report of this thread
 
-    my $report;
-    foreach (@cluck) {
-        s/, thread #(\d+)$//;
-        $report .= $_;
+    my %tid = (0,1),map {$_->tid,1} threads->list;
+    while (my $tid = each( %report )) {
+        delete( $report{$tid} ) unless exists $tid{$tid};
     }
     $report{$tid} = $report;
 } #_remember
+
+#---------------------------------------------------------------------------
+# OUT: 1 generated report in plain text
+#      2..N stack dump
+
+sub _plain {
+
+# Tell the world what it is
+# Obtain frequency and dump list references
+
+    my $text = '*** '.__PACKAGE__." report ***\n";
+    my ($at,$dump,$tid) = _dump();
+
+# If we have any information
+#  If we're to do the summary
+#   Show all different locations
+#   And add a divider
+# Else (no information)
+#  Add some explanation
+
+    if (@$tid) {
+        if ($summary eq 'auto' ? (keys %$at < keys %report) : $summary) {
+            $text .= "$at->{$_} x $_" foreach sort keys %$at;
+            $text .= "\n";
+        }
+    } else {
+        $text .= "(no information found)\n";
+    }
+
+# Return the final report plus the dump
+
+    $text,map {"#$_: ".join('',@{$dump->{$_}})."\n"} @$tid;
+} #_plain
+
+#---------------------------------------------------------------------------
+# OUT: 1 generated report in XML
+
+sub _xml {
+
+# Tell the world what it is
+# Obtain frequency and dump list references
+
+    my $xml = <<EOD;
+<?xml version="1.0" encoding="$encoding"?>
+<report version="1.0">
+EOD
+    my ($at,$dump,$tid) = _dump();
+
+# If we're to do the summary
+#  Show all different locations
+
+    if ($summary eq 'auto' ? (keys %$at < keys %report) : $summary) {
+        $xml .= <<EOD;
+ <summary>
+EOD
+        $xml .= <<EOD foreach sort keys %$at;
+  <location frequency="$at->{$_}">$_</location>"
+EOD
+        $xml .= <<EOD;
+ </summary>
+EOD
+    }
+
+# For all of the thread id's
+#  Add the XML for this thread
+
+    foreach (@$tid) {
+        $xml .= <<EOD;
+ <thread id="$_">
+EOD
+        chomp( my @line = @{$dump->{$_}} );
+	s#^\s+## foreach @line;
+        $xml .= <<EOD foreach @line;
+  <at>$_</at>
+EOD
+        $xml .= <<EOD;
+ </thread>
+EOD
+    }
+
+# Return the final report plus the dump
+
+    "$xml</report>";
+} #_xml
+
+#---------------------------------------------------------------------------
+# OUT: 1 reference to hash with frequencies
+#      2 reference to hash with list references of dump
+#      3 reference to list with keys (thread id's) in dump hash
+
+sub _dump {
+
+# Initialize the thread id list
+# Initialize the at hash
+# Initialize the dump hash
+
+    my @tid;
+    my %at;
+    my %dump;
+
+# For all of the threads still running
+#  Make a list again
+#  Shorten the package names if they should be
+#  Count the first list
+#  Indicate start of thread if appropriate
+
+    foreach (@tid = sort {$a <=> $b} keys %report) {
+        my @cluck = split( "\0",$report{$_} );
+        @cluck = map {s#$paths##;$_} @cluck if $shorten;
+        $at{$cluck[0]}++;
+        $cluck[-1] =~ s#eval \{\.\.\.\} called#thread started#;
+
+#  Shorten list of callers if so specified
+#  Remove the thread information (if any)
+#  Add these lines to the dump
+
+        splice( @cluck,$callers ) if $callers;
+        s/, thread #(\d+)$// foreach @cluck;
+        $dump{$_} = \@cluck;
+    }
+
+# Return references to stuff we made here
+
+    return \%at,\%dump,\@tid;
+} #_dump
 
 #---------------------------------------------------------------------------
 
@@ -93,9 +359,31 @@ sub _remember {
 
 #---------------------------------------------------------------------------
 #  IN: 1 class (ignored)
-#      2 file to which to save (optional: default)
+#      2 output filename (optional)
+# or:
+#  IN: 1 class (ignored)
+#      2..N method/value hash
 
-sub import { goto &report } #import
+sub import {
+
+# Switch on reporting
+# Handle simple output specification if so
+
+    on();
+    goto &output if @_ == 2;
+
+# Get the parameter hash
+# For all of the methods and values
+#  Die now if invalid method
+#  Call the method with the value
+
+    my ($class,%param) = @_;
+    while (my ($method,$value) = each %param) {
+	die "Cannot call method $method during initialization\n" unless
+	 $method =~ m#^(?:callers|encoding|format|output|shorten|summary)$#;
+        $class->$method( $value );
+    }
+} #import
 
 #---------------------------------------------------------------------------
 
@@ -104,17 +392,17 @@ END {
 # Attempt to lock the report flag
 # Return now if we don't need to report
 
-    lock( $report );
-    return unless $report;
+    lock( $output );
+    return unless $output;
 
 # Initialize handle to write to
 # If we have the default value
 #  Set to write to standard error
 
     my $handle;
-    if ($report eq 'STDERR') {
+    if ($output eq 'STDERR') {
         $handle = *STDERR;
-    } elsif ($report eq 'STDOUT') {
+    } elsif ($output eq 'STDOUT') {
         $handle = *STDOUT;
 
 # Elseif successful in opening it as a file (no action)
@@ -122,25 +410,22 @@ END {
 #  Set to use standard error
 #  And let the world know why
 
-    } elsif (open( $handle,'>',$report )) {
+    } elsif (open( $handle,'>',$output )) {
     } else {
         $handle = *STDERR;
 	print $handle <<EOD;
-Could not report to $report ($!)
+Could not report to $output ($!)
 Writing to STDERR instead
 EOD
     }
 
-# Tell the world what it is
-# For all of the keys in the report
-#  Tell the world about it
 # Indicate that no-one else needs to report
+# Allow variable specifications
+# Tell the world what it is
 
-    print $handle '*** '.__PACKAGE__." report ***\n";
-    foreach (sort {$a <=> $b} keys %report) {
-        print $handle "$report{$_}\n";
-    }
-    $report = '';
+    $output = '';
+    no strict 'refs';
+    print {$handle} &{'_'.$format};
 } #END
 
 #---------------------------------------------------------------------------
@@ -153,14 +438,43 @@ Thread::Deadlock - report deadlocks with stacktrace
 
 =head1 SYNOPSIS
 
-    perl -MThread::Deadlock program            # report to STDERR
-    perl -MThread::Deadlock=filename program   # report to file
+  perl -MThread::Deadlock program          # report to STDERR
+  perl -MThread::Deadlock=filename program # report to file
 
-    use Thread::Deadlock;                      # report to STDERR
-    use Thread::Deadlock 'filename';           # report to file
+  use Thread::Deadlock;                    # report to STDERR
+  use Thread::Deadlock 'filename';         # report to file
+  use Thread::Deadlock ();                 # set up, need on() later
 
-    Thread::Deadlock->report( 'filename' );    # report to file
-    Thread::Deadlock->report( '' );            # do not report
+  use Thread::Deadlock (                   # call class methods easily
+   summary  => 'auto',
+   callers  => 4,
+   shorten  => 1,
+   format   => 'plain',
+   encoding => 'iso-latin-1',
+   output   => 'STDERR',
+  );
+
+  Thread::Deadlock->summary( 'auto' );       # default, automatic
+  Thread::Deadlock->summary( 0 );            # don't do summary
+  Thread::Deadlock->summary( 1 );            # do summary always
+
+  Thread::Deadlock->callers( 4 );            # default, show 4 lines in dump
+  Thread::Deadlock->callers( 0 );            # show all lines in dump
+
+  Thread::Deadlock->shorten( 1 );            # default: shorten package names
+  Thread::Deadlock->shorten( 0 );            # do not shorten package names
+
+  Thread::Deadlock->format( 'plain' );       # default, plain text format
+  Thread::Deadlock->format( 'xml' );         # set XML format
+  Thread::Deadlock->encoding('iso-latin-1'); # only needed for XML format
+
+  Thread::Deadlock->off;                     # disable in this thread
+  Thread::Deadlock->on;                      # enable again in this thread
+
+  $report = Thread::Deadlock->report;        # return intermediate report
+
+  Thread::Deadlock->output( 'filename' );    # report to file
+  Thread::Deadlock->disable;                 # disable report
 
 =head1 DESCRIPTION
 
@@ -187,19 +501,109 @@ report is written to STDERR, but can be redirected to a file of your choice.
 
 =head1 CLASS METHODS
 
-There is one class method.
+There are only class methods.  The class methods L<summary>, L<callers>,
+L<shorten>, L<format>, L<encoding> and L<output> methods can also be called
+as fields in a parameter hash with C<use>.
 
+=head2 on
+
+ Thread::Deadlock->on;
+
+The "on" class method switches reporting B<on> for the current thread and any
+threads that are created from this thread.
+
+=head2 off
+
+ Thread::Deadlock->off;
+
+The "off" class method switches reporting B<off> for the current thread and
+any threads that are created from this thread.
+
+=head2 summary
+
+ Thread::Deadlock->summary( 'auto' );  # default, automatic
+
+ Thread::Deadlock->summary( 0 );       # don't do summary
+
+ Thread::Deadlock->summary( 1 );       # always do summary
+
+ $summary = Thread::Deadlock->summary;
+
+The "summary" class method sets and returns whether a thread summary will be
+added to the report.  By default, a summary will be added if there are at least
+two threads at the same location in the source.
+
+=head2 callers
+
+ Thread::Deadlock->callers( 4 );       # default, return 4 callers
+ 
+ Thread::Deadlock->callers( 0 );       # return all callers
+
+ $callers = Thread::Deadlock->callers;
+
+The "callers" class method sets and returns the number of callers that should
+be shown in the report.  By default, only 4 callers will be shown.
+
+=head2 shorten
+
+ Thread::Deadlock->shorten( 1 );       # default, shorten
+ 
+ Thread::Deadlock->shorten( 0 );       # do not shorten package names
+
+ $shorten = Thread::Deadlock->shorten;
+
+The "shorten" class method sets and returns whether package names should be
+shortened in the dump.  By default, package names will be shortened, to create
+a more readable report.
+
+=head2 format
+
+ Thread::Deadlock->format( 'plain' );  # default, make plain text report
+
+ Thread::Deadlock->format( 'xml' );    # make xml report
+
+ $format = Thread::Deadlock->format;
+
+The "format" class method sets and returns the format in which the report
+will be generated.  By default, the report will be created in plain text.
+If you select 'xml', you may want to change the L<encoding> setting of the
+XML that will be generated.
+
+=head2 encoding
+
+ Thread::Deadlock->encoding( 'iso-latin-1' );  # default
+
+ $encoding = Thread::Deadlock->encoding;
+
+The "encoding" class method sets and returns the encoding in which the report
+will be generated if B<xml> was selected as the L<format>.  By default, the
+report will be created in 'ISO-Latin-1' encoding.
+ 
 =head2 report
 
- Thread::Deadlock->report( 'filename' );  # write to specific file
+ $report = Thread::Deadlock->report;
 
- Thread::Deadlock->report( '' );          # disable reporting
+The "report" class method returns the report that is otherwise automatically
+created when the program finishes.  It can be used for creation of
+intermediate reports.  It can be called by _any_ thread.
 
- $report = Thread::Deadlock->report;      # obtain current setting
+=head2 output
 
-The "report" class method returns the current setting for the thread
+ Thread::Deadlock->output( 'filename' );  # write to specific file
+
+ $output = Thread::Deadlock->output;      # obtain current setting
+
+The "output" class method returns the current setting for the thread
 checkpoint report.  It can also be used to set the name of the file to which
-the report will be written, or to disable report writing altogether.
+the report will be written.  Call L<disable> to disable reporting.
+
+=head2 disable
+
+ Thread::Deadlock->disable;
+
+The "disable" class method disables reporting altogether.  This can be handy
+if your program has completed successfully and you're not interested in a
+report.
 
 =head1 CAVEATS
 

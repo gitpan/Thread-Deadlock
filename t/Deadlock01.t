@@ -11,13 +11,24 @@ BEGIN { use_ok( 'Thread::Deadlock' ) }
 BEGIN { use_ok( 'threads::shared' ) } # export cond_family
 
 can_ok( 'Thread::Deadlock',qw(
+ callers
+ disable
+ encoding
+ format
+ import
+ off
+ on
+ output
  report
+ shorten
+ summary
 ) );
-Thread::Deadlock->report( 'report' );
+Thread::Deadlock->output( 'report' );
 
 my $lock : shared;
 
-my $thread = threads->new( sub {
+threads->new( sub {
+ Thread::Deadlock->off;
  lock( $lock );
  $lock = 1;
  cond_wait( $lock );
@@ -28,4 +39,17 @@ threads->yield until $lock;
  lock( $lock );
  cond_signal( $lock );
 }
-$thread->join;
+
+threads->new( sub {
+ lock( $lock );
+ $lock = 0;
+ cond_wait( $lock );
+} );
+threads->yield while $lock;
+
+Thread::Deadlock->off;
+{
+ lock( $lock );
+ cond_broadcast( $lock );
+}
+$_->join foreach threads->list;

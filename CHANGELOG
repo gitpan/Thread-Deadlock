@@ -1,2 +1,33 @@
-0.01	27 July 2002
-	First version of Thread::Thread;
+0.02	29 August 2002
+	Robert Soderberg had some suggestions ;-)
+
+	Added "off" (and "on") class methods for switching reporting off (or
+	on) for a specific thread and all the threads that are created there.
+	
+	Renamed method "report" to "output": "report" now returns a
+	preliminary report.
+	
+	Added support for different output formats, "plain" and "xml", and
+	added "format" to allow you to select the type.  Added "encoding"
+	method for specifying encoding if XML type is used.
+
+	Added support for summary, which can be selected with the new
+	"summary" class method.
+
+	Added support for limiting numbers of elements in the stacktrace and
+	a class method "callers" to specify that number.
+
+	Added support for shortening package names and a class method "shorten"
+	to specify that setting.
+
+	Added "disable" class method for disabling automatic report generation
+	upon exit of the program.
+
+	Now only reports threads that were actually running when the last
+	checkpoint was done.  This should give a better approximation to
+	reporting only live threads.
+
+	Fixed some typo's here.
+
+0.01	28 August 2002
+	First version of Thread::Deadlock;

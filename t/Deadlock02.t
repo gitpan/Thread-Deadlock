@@ -13,11 +13,11 @@ undef( $/ );
 ok( open( my $handle,'<',$filename ),	'check opening of report file' );
 is( <$handle>,<<EOD,			'check report itself' );
 *** Thread::Deadlock report ***
-Thread 0: cond_signal() at t/Deadlock01.t line 29
+#0: cond_signal() at t/Deadlock01.t line 40
 
-Thread 1: cond_wait() at t/Deadlock01.t line 23
-	main::__ANON__() called at t/Deadlock01.t line 24
-	thread started at t/Deadlock01.t line 24
+#2: cond_wait() at t/Deadlock01.t line 46
+	main::__ANON__() called at t/Deadlock01.t line 47
+	thread started at t/Deadlock01.t line 47
 
 EOD
 ok( close( $handle ),			'check closing of file' );
