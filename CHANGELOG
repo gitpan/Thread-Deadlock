@@ -1,3 +1,9 @@
+0.03	29 August 2002
+	Added trace capability, settable with the trace class method.
+
+	Argh.  Apparently introduced some errors just before uploading.
+	Should be all fixed now.
+
 0.02	29 August 2002
 	Robert Soderberg had some suggestions ;-)
 

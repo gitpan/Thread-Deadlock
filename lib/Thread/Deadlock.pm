@@ -3,7 +3,7 @@ package Thread::Deadlock;
 # Make sure we have version info for this module
 # Make sure we do everything by the book from now on
 
-our $VERSION : unique = '0.02';
+our $VERSION : unique = '0.03';
 use strict;
 
 # Make sure we have threads
@@ -15,7 +15,7 @@ use threads::shared ();
 use sigtrap qw(die normal-signals);
 
 # Make sure we can cluck
-# Initialize hi-jacked flag
+# Initialize thread local hi-jacked flag
 # Initialize output destination
 # Report from each thread
 
@@ -35,6 +35,12 @@ my $callers  : shared = 4;
 my $shorten  : shared = 1;
 my $format   : shared = 'plain';
 my $encoding : shared = 'iso-latin-1';
+
+# Initialize trace setting
+# Initialize thread local handle for writing trace
+
+my $trace    : shared;
+my $tracehandle;
 
 # Save current coderefs
 
@@ -192,6 +198,13 @@ sub output { $output = $_[1] if @_ >1; $output } #output
 sub disable { $output = '' } #disable
 
 #---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+#      2 name of file to write to (no change)
+# OUT: 1 current setting
+
+sub trace { $trace = $_[1] if @_ >1; $trace } #trace
+
+#---------------------------------------------------------------------------
 
 # internal routines
 
@@ -208,13 +221,28 @@ sub _remember {
 # Obtain the stacktrace
 # Remove this call
 # Add what we're remembering
-# Create version that can be stored in shared hash
 
     my $tid = threads->tid;
     my @cluck = split( m#(?<=$/)#,Carp::longmess() );
     shift( @cluck );
     $cluck[0] =~ s#.*?called#shift#e;
-    my $report = join( "\0",@cluck );
+
+# If we're tracing
+#  Obtain handle if there is no handle yet
+#  Create local copy of trace line
+#  Shorten it if so specified
+#  Write the trace to the file
+# Elseif we have a trace handle (but we stopped tracing)
+#  Close the handle and mark as unused again
+
+    if ($trace) {
+        $tracehandle ||= _handle( $trace,'>>' );
+	my $line = $cluck[0];
+	$line =~ s#$paths## if $shorten;
+	print {$tracehandle} "$tid: $line";
+    } elsif ($tracehandle) {
+        undef( $tracehandle );
+    }
 
 # Create a hash with valid tid's (include main thread, which is not in list)
 # For all of the keys in the report hash
@@ -225,7 +253,7 @@ sub _remember {
     while (my $tid = each( %report )) {
         delete( $report{$tid} ) unless exists $tid{$tid};
     }
-    $report{$tid} = $report;
+    $report{$tid} = join( "\0",@cluck );
 } #_remember
 
 #---------------------------------------------------------------------------
@@ -354,6 +382,50 @@ sub _dump {
 } #_dump
 
 #---------------------------------------------------------------------------
+#  IN: 1 output specification
+#      2 open mode (default: '>')
+# OUT: 1 opened handle
+
+sub _handle {
+
+# Obtain the output specification
+# Obtain open mode
+# Initialize handle to write to
+
+    my $filename = shift;
+    my $mode = shift || '>';
+    my $handle;
+
+# If we have the default value
+#  Set to write to standard error
+# Elseif we just want to print
+#  Set to write to standard output
+
+    if ($filename eq 'STDERR') {
+        $handle = *STDERR;
+    } elsif ($filename eq 'STDOUT') {
+        $handle = *STDOUT;
+
+# Elseif successful in opening it as a file (no action)
+# Else (not successful in opening file)
+#  Set to use standard error
+#  And let the world know why
+
+    } elsif (open( $handle,$mode,$filename )) {
+    } else {
+        $handle = *STDERR;
+	print $handle <<EOD;
+Could not report to $filename ($!)
+Writing to STDERR instead
+EOD
+    }
+
+# Return the resulting handle
+
+    $handle;
+} #_handle
+
+#---------------------------------------------------------------------------
 
 # routines for standard perl features
 
@@ -379,8 +451,9 @@ sub import {
 
     my ($class,%param) = @_;
     while (my ($method,$value) = each %param) {
-	die "Cannot call method $method during initialization\n" unless
-	 $method =~ m#^(?:callers|encoding|format|output|shorten|summary)$#;
+	die "Cannot call method $method during initialization\n"
+	 unless $method =~
+	  m#^(?:callers|encoding|format|output|shorten|summary|trace)$#;
         $class->$method( $value );
     }
 } #import
@@ -395,37 +468,13 @@ END {
     lock( $output );
     return unless $output;
 
-# Initialize handle to write to
-# If we have the default value
-#  Set to write to standard error
-
-    my $handle;
-    if ($output eq 'STDERR') {
-        $handle = *STDERR;
-    } elsif ($output eq 'STDOUT') {
-        $handle = *STDOUT;
-
-# Elseif successful in opening it as a file (no action)
-# Else (not successful in opening file)
-#  Set to use standard error
-#  And let the world know why
-
-    } elsif (open( $handle,'>',$output )) {
-    } else {
-        $handle = *STDERR;
-	print $handle <<EOD;
-Could not report to $output ($!)
-Writing to STDERR instead
-EOD
-    }
-
-# Indicate that no-one else needs to report
 # Allow variable specifications
 # Tell the world what it is
+# Indicate that no-one else needs to report
 
-    $output = '';
     no strict 'refs';
-    print {$handle} &{'_'.$format};
+    print {_handle( $output )} &{'_'.$format};
+    $output = '';
 } #END
 
 #---------------------------------------------------------------------------
@@ -452,6 +501,7 @@ Thread::Deadlock - report deadlocks with stacktrace
    format   => 'plain',
    encoding => 'iso-latin-1',
    output   => 'STDERR',
+   trace    => undef,
   );
 
   Thread::Deadlock->summary( 'auto' );       # default, automatic
@@ -476,6 +526,9 @@ Thread::Deadlock - report deadlocks with stacktrace
   Thread::Deadlock->output( 'filename' );    # report to file
   Thread::Deadlock->disable;                 # disable report
 
+  Thread::Deadlock->trace( 'filename' );     # start tracing to file
+  Thread::Deadlock->untrace;                 # stop tracing (default)
+
 =head1 DESCRIPTION
 
                   *** A note of CAUTION ***
@@ -499,11 +552,15 @@ program, e.g. by pressing Control-C), then a report will be generated for each
 thread, indicating where each thread had its last checkpoint.  By default, this
 report is written to STDERR, but can be redirected to a file of your choice.
 
+On top of this, it is also possible to have a trace generated of each time
+a cond_wait(), cond_signal() or cond_broadcast() was called.  This may give
+additional information as to how a problem such as a deadlock, can occur.
+
 =head1 CLASS METHODS
 
 There are only class methods.  The class methods L<summary>, L<callers>,
-L<shorten>, L<format>, L<encoding> and L<output> methods can also be called
-as fields in a parameter hash with C<use>.
+L<shorten>, L<format>, L<encoding>, L<output> and L<trace> methods can also
+be called as fields in a parameter hash with C<use>.
 
 =head2 on
 
@@ -597,6 +654,9 @@ The "output" class method returns the current setting for the thread
 checkpoint report.  It can also be used to set the name of the file to which
 the report will be written.  Call L<disable> to disable reporting.
 
+The strings "STDOUT" and "STDERR" can be used to indicate standard output and
+standard error respectively.
+
 =head2 disable
 
  Thread::Deadlock->disable;
@@ -604,6 +664,27 @@ the report will be written.  Call L<disable> to disable reporting.
 The "disable" class method disables reporting altogether.  This can be handy
 if your program has completed successfully and you're not interested in a
 report.
+
+=head2 trace
+
+ Thread::Deadlock->trace( 'filename');    # start tracing to specific file
+
+ $trace = Thread::Deadlock->trace;
+
+The "trace" class method sets and returns the filename to which a trace will
+be appended.  By default, no tracing occurs in which case C<undef> will be
+returned.  Call L<untrace> to disable tracing for B<all> threads.
+
+The strings "STDOUT" and "STDERR" can be used to indicate standard output and
+standard error respectively.
+
+=head2 disable
+
+ Thread::Deadlock->untrace;
+
+The "untrace" class method disables tracing for B<all> threads.  This can be
+handy if there are sections in your program that you do not want to have
+traced.
 
 =head1 CAVEATS
 

@@ -5,7 +5,7 @@ BEGIN {				# Magic Perl CORE pragma
     }
 }
 
-use Test::More tests => 3;
+use Test::More tests => 7;
 
 BEGIN { use_ok( 'Thread::Deadlock' ) }
 BEGIN { use_ok( 'threads::shared' ) } # export cond_family
@@ -22,8 +22,17 @@ can_ok( 'Thread::Deadlock',qw(
  report
  shorten
  summary
+ trace
 ) );
-Thread::Deadlock->output( 'report' );
+
+my $report = 'report';
+is( Thread::Deadlock->output,'STDERR',	'check default output setting' );
+is( Thread::Deadlock->output($report),$report,'check new output setting' );
+
+my $trace = 'trace';
+unlink( $trace );
+ok( !defined( Thread::Deadlock->trace ),'check default trace setting' );
+is( Thread::Deadlock->trace($trace),$trace,'check new trace setting' );
 
 my $lock : shared;
 
