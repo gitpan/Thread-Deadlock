@@ -3,8 +3,12 @@ package Thread::Deadlock;
 # Make sure we have version info for this module
 # Make sure we do everything by the book from now on
 
-our $VERSION : unique = '0.03';
+our $VERSION = '0.04';
 use strict;
+
+# Make sure we only load stuff when we actually need it
+
+use AutoLoader 'AUTOLOAD';
 
 # Make sure we have threads
 # Make sure we can lock
@@ -21,8 +25,8 @@ use sigtrap qw(die normal-signals);
 
 use Carp ();
 my $hijacked;
-my $output : shared = 'STDERR';
-my %report : shared;
+our $output : shared = 'STDERR';
+our %report : shared;
 
 # Initialize summary setting
 # Initialize callers setting
@@ -30,23 +34,23 @@ my %report : shared;
 # Initialize format
 # Initialize XML encoding
 
-my $summary  : shared = 'auto';
-my $callers  : shared = 4;
-my $shorten  : shared = 1;
-my $format   : shared = 'plain';
-my $encoding : shared = 'iso-latin-1';
+our $summary  : shared = 'auto';
+our $callers  : shared = 4;
+our $shorten  : shared = 1;
+our $format   : shared = 'plain';
+our $encoding : shared = 'iso-latin-1';
 
 # Initialize trace setting
 # Initialize thread local handle for writing trace
 
-my $trace    : shared;
+our $trace    : shared;
 my $tracehandle;
 
 # Save current coderefs
 
-my $cond_wait      = \&threads::shared::cond_wait;
-my $cond_signal    = \&threads::shared::cond_signal;
-my $cond_broadcast = \&threads::shared::cond_broadcast;
+our $cond_wait      = \&threads::shared::cond_wait;
+our $cond_signal    = \&threads::shared::cond_signal;
+our $cond_broadcast = \&threads::shared::cond_broadcast;
 
 # Make sure we don't get warnings for the hijacking
 # Install hi-jacked coderefs, we can't do lock() yet ;-(
@@ -64,12 +68,70 @@ my $cond_broadcast = \&threads::shared::cond_broadcast;
 # Create match string for paths
 # Make a regular exprssion of it
 
-our $paths : unique = join( '/|',sort {length($b) - length($a)} @INC ).'/';
+our $paths = join( '/|',sort {length($b) - length($a)} @INC ).'/';
 $paths = qr#(?<= at )(?:$paths)#;
 
 # Satisfy -require-
 
 1;
+
+#---------------------------------------------------------------------------
+
+# routines for standard perl features
+
+#---------------------------------------------------------------------------
+#  IN: 1 class (ignored)
+#      2 output filename (optional)
+# or:
+#  IN: 1 class (ignored)
+#      2..N method/value hash
+
+sub import {
+
+# Switch on reporting
+# Handle simple output specification if so
+
+    on();
+    goto &output if @_ == 2;
+
+# Get the parameter hash
+# For all of the methods and values
+#  Die now if invalid method
+#  Call the method with the value
+
+    my ($class,%param) = @_;
+    while (my ($method,$value) = each %param) {
+	die "Cannot call method $method during initialization\n"
+	 unless $method =~
+	  m#^(?:callers|encoding|format|output|shorten|summary|trace)$#;
+        $class->$method( $value );
+    }
+} #import
+
+#---------------------------------------------------------------------------
+
+END {
+
+# Attempt to lock the report flag
+# Return now if we don't need to report
+
+    lock( $output );
+    return unless $output;
+
+# Allow variable specifications
+# Tell the world what it is
+# Indicate that no-one else needs to report
+
+    no strict 'refs';
+    print {_handle( $output )} &{'_'.$format};
+    $output = '';
+} #END
+
+#---------------------------------------------------------------------------
+
+# AutoLoader takes over from here
+
+__END__
 
 #---------------------------------------------------------------------------
 
@@ -357,13 +419,22 @@ sub _dump {
 
 # For all of the threads still running
 #  Make a list again
-#  Shorten the package names if they should be
-#  Count the first list
-#  Indicate start of thread if appropriate
+#  If we should shorten stuff
+#   Shorten the package name
+#   Remove (autosplit...) reference (don't need that usually)
 
     foreach (@tid = sort {$a <=> $b} keys %report) {
         my @cluck = split( "\0",$report{$_} );
-        @cluck = map {s#$paths##;$_} @cluck if $shorten;
+        if ($shorten) {
+            foreach (@cluck) {
+                s#$paths##;
+                s# \(autosplit(?:[^)]+)\)##;
+            }
+        }
+
+#  Count the first list
+#  Indicate start of thread if appropriate
+
         $at{$cluck[0]}++;
         $cluck[-1] =~ s#eval \{\.\.\.\} called#thread started#;
 
@@ -426,60 +497,6 @@ EOD
 } #_handle
 
 #---------------------------------------------------------------------------
-
-# routines for standard perl features
-
-#---------------------------------------------------------------------------
-#  IN: 1 class (ignored)
-#      2 output filename (optional)
-# or:
-#  IN: 1 class (ignored)
-#      2..N method/value hash
-
-sub import {
-
-# Switch on reporting
-# Handle simple output specification if so
-
-    on();
-    goto &output if @_ == 2;
-
-# Get the parameter hash
-# For all of the methods and values
-#  Die now if invalid method
-#  Call the method with the value
-
-    my ($class,%param) = @_;
-    while (my ($method,$value) = each %param) {
-	die "Cannot call method $method during initialization\n"
-	 unless $method =~
-	  m#^(?:callers|encoding|format|output|shorten|summary|trace)$#;
-        $class->$method( $value );
-    }
-} #import
-
-#---------------------------------------------------------------------------
-
-END {
-
-# Attempt to lock the report flag
-# Return now if we don't need to report
-
-    lock( $output );
-    return unless $output;
-
-# Allow variable specifications
-# Tell the world what it is
-# Indicate that no-one else needs to report
-
-    no strict 'refs';
-    print {_handle( $output )} &{'_'.$format};
-    $output = '';
-} #END
-
-#---------------------------------------------------------------------------
-
-__END__
 
 =head1 NAME
 
@@ -685,6 +702,15 @@ standard error respectively.
 The "untrace" class method disables tracing for B<all> threads.  This can be
 handy if there are sections in your program that you do not want to have
 traced.
+
+=head1 OPTIMIZATIONS
+
+This module uses L<AutoLoader> to reduce memory and CPU usage. This causes
+subroutines only to be compiled in a thread when they are actually needed at
+the expense of more CPU when they need to be compiled.  Simple benchmarks
+however revealed that the overhead of the compiling single routines is not
+much more (and sometimes a lot less) than the overhead of cloning a Perl
+interpreter with a lot of subroutines pre-loaded.
 
 =head1 CAVEATS
 

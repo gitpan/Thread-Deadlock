@@ -1,3 +1,11 @@
+0.04	31 August 2002
+        Changed module to use AutoLoader to defer loading of necessary
+	subroutines to when they are actually needed.  This should save
+	memory and CPU for larger programs, or with large numbers of threads.
+
+	30 August 2002
+	Setting shorten to true now also removes (autosplit...) text.
+
 0.03	29 August 2002
 	Added trace capability, settable with the trace class method.
 
